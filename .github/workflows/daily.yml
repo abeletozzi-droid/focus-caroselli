@@ -20,7 +20,7 @@ jobs:
           node-version: '20'
       - name: Publish today's carousel
         env:
-          GRAPH_TOKEN: ${{ secrets.GRAPH_TOKEN }}
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           DAY: ${{ github.event.inputs.day }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: node publish.mjs
