@@ -1,13 +1,14 @@
 // Autoposter Focus Adv — pubblica il carosello del giorno su Instagram + Facebook.
 // Eseguito da GitHub Actions (daily.yml). Zero dipendenze (fetch nativo).
-// Secrets richiesti (env): GRAPH_TOKEN, IG_USER_ID, FB_PAGE_ID.
+// Secret richiesto (env): GRAPH_TOKEN. IG_USER_ID/FB_PAGE_ID non sono segreti:
+// hanno un default fisso (l'account Focus Adv) sovrascrivibile via env.
 // Input opzionali: DAY (forza un giorno), DRY_RUN=1 (non pubblica, stampa e basta).
 import { readFileSync } from 'node:fs';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 const TOKEN = process.env.GRAPH_TOKEN;
-const IG = process.env.IG_USER_ID;
-const PAGE = process.env.FB_PAGE_ID;
+const IG = process.env.IG_USER_ID || '27879522138364660';   // @focusmediadv (IG business)
+const PAGE = process.env.FB_PAGE_ID || '107016051875243';   // Focus Adv (FB Page)
 const DRY = process.env.DRY_RUN === '1';
 
 function todayRome() {
@@ -61,7 +62,7 @@ async function publishFacebook(entry) {
 }
 
 async function main() {
-  if (!TOKEN || !IG || !PAGE) throw new Error('Mancano i secrets: GRAPH_TOKEN, IG_USER_ID, FB_PAGE_ID');
+  if (!TOKEN) throw new Error('Manca il secret GRAPH_TOKEN');
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url)));
   const forced = process.env.DAY ? Number(process.env.DAY) : null;
   const entry = forced

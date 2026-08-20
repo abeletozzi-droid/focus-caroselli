@@ -21,8 +21,6 @@ jobs:
       - name: Publish today's carousel
         env:
           GRAPH_TOKEN: ${{ secrets.GRAPH_TOKEN }}
-          IG_USER_ID: ${{ secrets.IG_USER_ID }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           DAY: ${{ github.event.inputs.day }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: node publish.mjs
