@@ -1,0 +1,28 @@
+name: Focus Adv — daily carousel
+on:
+  schedule:
+    - cron: '0 9 * * *'   # 09:00 UTC ~ 11:00 Europe/Rome, ogni giorno
+  workflow_dispatch:
+    inputs:
+      day:
+        description: 'Forza un giorno specifico (1-100), vuoto = oggi'
+        required: false
+      dry_run:
+        description: 'Metti 1 per simulare senza pubblicare'
+        required: false
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Publish today's carousel
+        env:
+          GRAPH_TOKEN: ${{ secrets.GRAPH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          DAY: ${{ github.event.inputs.day }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: node publish.mjs
