@@ -1,14 +1,18 @@
 // Autoposter Focus Adv — pubblica il carosello del giorno su Instagram + Facebook.
 // Eseguito da GitHub Actions (daily.yml). Zero dipendenze (fetch nativo).
-// Secret richiesto (env): GRAPH_TOKEN. IG_USER_ID/FB_PAGE_ID non sono segreti:
-// hanno un default fisso (l'account Focus Adv) sovrascrivibile via env.
+// Pubblica tramite il PROXY HTTP di Composio: il CLI Composio e' solo-macOS,
+// quindi in CI usiamo l'API HTTP che inietta i token Meta (nessun token Meta
+// da conservare: serve solo il secret COMPOSIO_API_KEY).
+//   - Instagram: connected account instagram (graph.instagram.com) -> caroselli
+//   - Facebook : connected account facebook (graph.facebook.com) -> Page token a runtime
 // Input opzionali: DAY (forza un giorno), DRY_RUN=1 (non pubblica, stampa e basta).
 import { readFileSync } from 'node:fs';
 
-const GRAPH = 'https://graph.facebook.com/v21.0';
-const TOKEN = process.env.GRAPH_TOKEN;
-const IG = process.env.IG_USER_ID || '27879522138364660';   // @focusmediadv (IG business)
-const PAGE = process.env.FB_PAGE_ID || '107016051875243';   // Focus Adv (FB Page)
+const PROXY = 'https://backend.composio.dev/api/v3/tools/execute/proxy';
+const CK = process.env.COMPOSIO_API_KEY;
+const IG_CA = process.env.IG_CA || 'ca_4FpAO2GDvZKh';   // instagram @focusmediadv (BUSINESS)
+const FB_CA = process.env.FB_CA || 'ca_d_hVRBBm9qEL';   // facebook (admin Pagina Focus Adv)
+const PAGE = process.env.FB_PAGE_ID || '107016051875243'; // Focus Adv (FB Page)
 const DRY = process.env.DRY_RUN === '1';
 
 function todayRome() {
@@ -17,52 +21,68 @@ function todayRome() {
   return f.format(new Date());
 }
 
-async function g(path, params) {
-  const url = new URL(GRAPH + path);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  url.searchParams.set('access_token', TOKEN);
-  const r = await fetch(url, { method: 'POST' });
+const enc = encodeURIComponent;
+
+async function proxy(connectedAccountId, endpoint, method = 'POST') {
+  // Inoltra una chiamata Graph tramite il proxy Composio, che inietta il token
+  // del connected account indicato. Ritorna il body Graph (campo .data).
+  const r = await fetch(PROXY, {
+    method: 'POST',
+    headers: { 'x-api-key': CK, 'content-type': 'application/json' },
+    body: JSON.stringify({ connected_account_id: connectedAccountId, endpoint, method }),
+  });
   const j = await r.json();
-  if (!r.ok || j.error) throw new Error(path + ' -> ' + JSON.stringify(j.error || j));
-  return j;
+  const status = j.status || r.status;
+  const data = j.data ?? j;
+  if (!r.ok || status >= 400 || (data && data.error)) {
+    throw new Error(endpoint.split('?')[0] + ' -> ' + JSON.stringify(data && data.error ? data.error : data));
+  }
+  return data;
 }
 
-async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+async function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
 async function publishInstagram(entry) {
   // 1 container figlio per slide, poi container carosello, poi publish.
   const children = [];
   for (const img of entry.images) {
-    const c = await g('/' + IG + '/media', { image_url: img, is_carousel_item: 'true' });
+    const c = await proxy(IG_CA, '/me/media?image_url=' + enc(img) + '&is_carousel_item=true');
     children.push(c.id);
     await sleep(1500);
   }
-  const parent = await g('/' + IG + '/media', {
-    media_type: 'CAROUSEL', children: children.join(','), caption: entry.caption,
-  });
-  // attesa elaborazione container prima del publish
-  await sleep(4000);
-  const pub = await g('/' + IG + '/media_publish', { creation_id: parent.id });
+  const parent = await proxy(
+    IG_CA,
+    '/me/media?media_type=CAROUSEL&children=' + enc(children.join(',')) + '&caption=' + enc(entry.caption),
+  );
+  await sleep(4000); // attesa elaborazione container prima del publish
+  const pub = await proxy(IG_CA, '/me/media_publish?creation_id=' + enc(parent.id));
   return pub.id;
 }
 
 async function publishFacebook(entry) {
-  // Foto non pubblicate, poi post con attached_media.
+  // Serve il Page token (le foto non pubblicate vanno postate "come Pagina").
+  const pageToken = (await proxy(FB_CA, '/' + PAGE + '?fields=access_token', 'GET')).access_token;
   const fbids = [];
   for (const img of entry.images) {
-    const p = await g('/' + PAGE + '/photos', { url: img, published: 'false' });
+    const p = await proxy(
+      FB_CA,
+      '/' + PAGE + '/photos?url=' + enc(img) + '&published=false&access_token=' + enc(pageToken),
+    );
     fbids.push(p.id);
     await sleep(800);
   }
   const attached = fbids.map((id) => ({ media_fbid: id }));
-  const post = await g('/' + PAGE + '/feed', {
-    message: entry.caption, attached_media: JSON.stringify(attached),
-  });
+  const post = await proxy(
+    FB_CA,
+    '/' + PAGE + '/feed?message=' + enc(entry.caption) +
+      '&attached_media=' + enc(JSON.stringify(attached)) +
+      '&access_token=' + enc(pageToken),
+  );
   return post.id;
 }
 
 async function main() {
-  if (!TOKEN) throw new Error('Manca il secret GRAPH_TOKEN');
+  if (!CK) throw new Error('Manca il secret COMPOSIO_API_KEY');
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url)));
   const forced = process.env.DAY ? Number(process.env.DAY) : null;
   const entry = forced
